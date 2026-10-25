@@ -889,16 +889,58 @@ SmStatus SmFilletSolver::CalcTorusFilletGeom
   if (pFilletGeom == NULL)
     { pFilletGeom = m_vFilletGeoms[0]; }
 
+  // Use the sample points in the order the rails run, from the rail start vertex to the rail
+  // end vertex. The samples may come in curve parameter order, against the edgeuse (seen with an
+  // arc of the fillet radius): the torus and its rail iso-curves are built from the first to the last sample,
+  // so a reversed sequence gave rails that run against the vertex order and TrimRailCurves
+  // rejected the trim interval. The trace path handles this with bReverseTracing, the
+  // analytic path did not.
+  SmTArray<SmTsectPnt*> sOrderedTsects( rTsectPnts ) ;
+  if ( sOrderedTsects.GetSize() > 1 )
+    {
+      ULONG             lLastTsect = sOrderedTsects.GetSize() - 1 ;
+      SmOffsetSurface * pTSurf0    = GetSurface(0) ;
+      SmOffsetSurface * pTSurf1    = GetSurface(1) ;
+      SmPoint3d         sFirst0, sFirst1 ;
+      SetSurfacesToZeroOffset();
+      SmStatus eFirst0 = pTSurf0->EvaluatePoint(sOrderedTsects[0]->UVPos(0), sFirst0) ;
+      SmStatus eFirst1 = pTSurf1->EvaluatePoint(sOrderedTsects[0]->UVPos(1), sFirst1) ;
+      ReloadSurfaceOffsets();
+      if ( eFirst0 == SM_SUCCESS && eFirst1 == SM_SUCCESS )
+        {
+          double dFirstToStart = 0.0, dFirstToEnd = 0.0 ;
+          ULONG  lChecked      = 0 ;
+          for ( ULONG jj=0; jj<2; jj++ )
+            {
+              SmFilletEdge    * pRail   = pFilletGeom->GetRail(jj) ;
+              SmFilletEdgeuse * pPrimEU = pRail ? (SmFilletEdgeuse*)pRail->GetPrimaryEdgeuse() : NULL ;
+              SmFilletEdgeuse * pMateEU = pPrimEU ? (SmFilletEdgeuse*)pPrimEU->GetMate() : NULL ;
+              if ( pPrimEU == NULL || pMateEU == NULL || pPrimEU->GetVertexuse() == NULL || pMateEU->GetVertexuse() == NULL )
+                { continue; }
+              SmFilletVertex * pStartV = (SmFilletVertex*)pPrimEU->GetVertexuse()->GetVertex() ;
+              SmFilletVertex * pEndV   = (SmFilletVertex*)pMateEU->GetVertexuse()->GetVertex() ;
+              if ( pStartV == NULL || pEndV == NULL || !pStartV->IsProcessed() || !pEndV->IsProcessed() )
+                { continue; }
+              SmPoint3d sStartPt = pStartV->GetPoint(), sEndPt = pEndV->GetPoint() ;
+              dFirstToStart += smos_Min( sFirst0.DistanceBetween(sStartPt), sFirst1.DistanceBetween(sStartPt) ) ;
+              dFirstToEnd   += smos_Min( sFirst0.DistanceBetween(sEndPt),   sFirst1.DistanceBetween(sEndPt) ) ;
+              lChecked++ ;
+            } // end iter both rails
+          if ( lChecked > 0 && dFirstToEnd < dFirstToStart )
+            { sOrderedTsects.ReverseArray( 0, sOrderedTsects.GetSize() ) ; }
+        }
+    } // end order the sample points like the rails
+
   // Get rotation point and axis for surf-of-revolution creation
   SmVector3d sAxisOfRevolution = sRefFrame.GetZAxis();
   SmPoint3d  sOrigin           = sRefFrame.GetOrigin();
 
   // Locate the generating curve(arc)
-  ULONG             lMaxIndex   = rTsectPnts.GetSize() - 1 ;
+  ULONG             lMaxIndex   = sOrderedTsects.GetSize() - 1 ;
   SmOffsetSurface * pSurf0      = GetSurface(0);                // offsetSurf1
   SmOffsetSurface * pSurf1      = GetSurface(1);                // offsetSurf2
-  SmPoint2d         sStartUV0   = rTsectPnts[0]->UVPos(0);
-  SmPoint2d         sStartUV1   = rTsectPnts[0]->UVPos(1);
+  SmPoint2d         sStartUV0   = sOrderedTsects[0]->UVPos(0);
+  SmPoint2d         sStartUV1   = sOrderedTsects[0]->UVPos(1);
   SmPoint3d         sArcCenter;
   double            dRadius1;
 
@@ -906,8 +948,8 @@ SmStatus SmFilletSolver::CalcTorusFilletGeom
   SER(pSurf0->EvaluatePoint(sStartUV0,sArcCenter));
 
   // get cross-section radius size at begin and end fillet points
-  SER(SetupOffsetValues(*rTsectPnts[0],         &dRadius));
-  SER(SetupOffsetValues(*rTsectPnts[lMaxIndex], &dRadius1));
+  SER(SetupOffsetValues(*sOrderedTsects[0],         &dRadius));
+  SER(SetupOffsetValues(*sOrderedTsects[lMaxIndex], &dRadius1));
   if (   dRadius < SM_EFF_ZERO
       || smos_Fabs(dRadius1-dRadius) > SM_EFF_ZERO)
     {
@@ -933,8 +975,9 @@ SmStatus SmFilletSolver::CalcTorusFilletGeom
   // let sVec = Point on Rail - circularFilletEdge Origin
   // let sDir = initial sweep direction
   SmVector3d sVec( sP0 - sOrigin );
+  SmPoint3d  sRadialBase( sP0 ) ;   // the rail point whose radial direction is the start of the rails
   if ( sVec.Length() < dAnalyticTol )
-    { sVec = sP1 - sOrigin; }
+    { sVec = sP1 - sOrigin; sRadialBase = sP1 ; }   // rail on surface 0 sits on the axis (edge radius == fillet radius)
 
   SmVector3d sDir = sAxisOfRevolution * sVec; // Start direction of rail curves
 
@@ -942,7 +985,12 @@ SmStatus SmFilletSolver::CalcTorusFilletGeom
   SmPoint3d sPV[2];
   SmExtent1d sIvl = pEdge->GetInterval();
   SmSolutionArray sSolutions;
-  SER(pCurve->GlobalPointSolve(sIvl, SM_SO_MINIMIZE, sArcCenter,
+  // Edge point of the first cross-section: the one closest to its rail point. The fillet
+  // circle centre (sArcCenter) was used before; it lies on the axis whenever the rail
+  // on surface 0 does, then every edge point is equally close, the solve returned an
+  // arbitrary point and the tangent test below compared a direction at the start of
+  // the rails with the tangent at the far end of the edge.
+  SER(pCurve->GlobalPointSolve(sIvl, SM_SO_MINIMIZE, sRadialBase,
                                dAnalyticTol,NULL,NULL,SM_SR_SINGLE,sSolutions));
   if (sSolutions.GetSize() != 1) SER(SM_ERR);
   SER(pCurve->Evaluate(sSolutions[0].m_vStart[0],1,TRUE,sPV));
@@ -988,8 +1036,8 @@ SmStatus SmFilletSolver::CalcTorusFilletGeom
   SmPoint3d sEndP0, sEndP1;
   // Evaluate points on base surfaces.  Use a zero-offset offset surface
   // instead of the base surface, in order to handle extended surfaces.
-  SmPoint2d sEndUV0 = rTsectPnts[lMaxIndex]->UVPos(0);
-  SmPoint2d sEndUV1 = rTsectPnts[lMaxIndex]->UVPos(1);
+  SmPoint2d sEndUV0 = sOrderedTsects[lMaxIndex]->UVPos(0);
+  SmPoint2d sEndUV1 = sOrderedTsects[lMaxIndex]->UVPos(1);
   SetSurfacesToZeroOffset();
   SER(pSurf0->EvaluatePoint(sEndUV0,sEndP0));   // sEndP0 = rail1 point
   SER(pSurf1->EvaluatePoint(sEndUV1,sEndP1));   // sEndP1 = rail2 point
