@@ -22,6 +22,10 @@
 #include <SmAssertArray.h>
 #include <SmAttribute.h>
 #include <SmMerge.h>
+#include <SmFace.h>
+#include <SmFaceuse.h>
+#include <SmShell.h>
+#include <SmRegion.h>
 
 
 /*******************************************************************//**
@@ -1385,6 +1389,28 @@ SmStatus SmTopologySweep::DoSweep
                                                 bMaybeNotClosedSolid,   // out: 
                                                 bJustUnifyNormals);     // in : 
                                                                         // note: increments unlocked mark value
+         // With the former condition in OrientTrimmedSurfaces (see 'RCLxx was: !bJustUnifyNormals' there)
+         // every face of the closed swept solid was also oriented by topology: the upward faceuse has to lie in the
+         // infinite region, otherwise the surface is reversed. The current condition skips that block, so a clockwise
+         // profile produced surface normals pointing into the solid, which inverts every face normal that an
+         // application reads from the surface. Apply the rule to the swept solid here.
+         {
+           SmRegion *pInfiniteRegion = pBrepToSweep->GetInfiniteRegion() ;
+           SmTArray<SmFace*> sOrientFaces ;
+           pBrepToSweep->GetFaces(sOrientFaces) ;
+           for(ULONG lOF = 0 ; lOF < sOrientFaces.GetSize() ; lOF++)
+             {
+               SmFaceuse *pUpFU   = sOrientFaces[lOF]->GetUpwardFaceuse() ;
+               SmFaceuse *pMateFU = pUpFU ? pUpFU->GetMate() : NULL ;
+               if(pUpFU == NULL || pMateFU == NULL || pUpFU->GetShell() == NULL || pMateFU->GetShell() == NULL)
+                 { continue ; }
+               if(pUpFU->GetShell()->GetRegion() == pMateFU->GetShell()->GetRegion())
+                 { continue ; }   // not a boundary between two regions
+               if(pUpFU->GetShell()->GetRegion() == pInfiniteRegion)
+                 { continue ; }   // upward faceuse already points outward
+               SER(sOrientFaces[lOF]->SwapUV()) ;
+             }
+         }
          DBG_VALIDATE_POINTERS // pRegion->GetBrep()->ValidatePointers()
                                // if(bDebugMe) pRegion->GetBrep()->ValidatePointers() 
 
