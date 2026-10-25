@@ -3258,6 +3258,7 @@ SmBoolean bDebugMe = FALSE ;
 
       SmApproxTol3d sApproxTol3d = SmTol::GetApproxTol3d(m_pTargetBrep) ; 
       m_vTI.SetThisApproxTol3d(sApproxTol3d);
+      SER(PropagateSplitFaceSSI()) ;   // split faces share the registered existing SSIs of their original face
       SER(m_vTI.IntersectInsertRelate());
 
 #ifdef SM_DEBUG_CODE
@@ -4518,6 +4519,11 @@ NOTES:
    or FilletCorners defined on the original Face, they might be defined on the
    portion of the Face that is now a new Face.  In that case, move it to the new Face.
 ***********************************************************************/
+// Temporary attribute shared by an original face and every face split off it by the rail and
+// corner merges (SM_AB_TEMP: neither copied on split nor written to files). Read and removed
+// by PropagateSplitFaceSSI() before the global merge.
+static const ULONG sm_lFilletSplitGroupAttrId = SM_AI_USER_3 + 4775 ;
+
 SmStatus SmFilletExecutive::UpdateTopologyChanges(
                 SmAttribute  *pFaceAttr, // in: Attribute whose users are the original and split Faces
                 SmFace *pOrigFace )      // in: the Face that pThisRail was in
@@ -4537,6 +4543,21 @@ SmStatus SmFilletExecutive::UpdateTopologyChanges(
     }
   if ( sFaces.GetSize() < 1 )
     { return SM_SUCCESS; }
+
+  // put the split faces into the split group of the original face, for PropagateSplitFaceSSI()
+  {
+    SmAttribute * pGroup = pOrigFace->FindAttribute( sm_lFilletSplitGroupAttrId );
+    if ( pGroup == NULL )
+      {
+        pGroup = new (m_crContext) SmAttribute( sm_lFilletSplitGroupAttrId, SM_AB_TEMP );
+        pOrigFace->AddAttribute( pGroup );
+      }
+    for ( ULONG ii=0; ii<sFaces.GetSize(); ii++ )
+      {
+        if ( sFaces[ii]->FindAttribute( sm_lFilletSplitGroupAttrId ) == NULL )
+          { sFaces[ii]->AddAttribute( pGroup ); }
+      }
+  }
 
   // We have to look at all FilletSolvers (FilletGeoms) and all FilletCorners.
   SmTArray<SmFilletSolver*> & rSolvers = this->GetFilletSolvers();
@@ -4573,6 +4594,61 @@ SmStatus SmFilletExecutive::UpdateTopologyChanges(
   return SM_SUCCESS;
 
 } // end SmFilletExecutive::UpdateTopologyChanges
+
+/*******************************************************************//**
+PURPOSE: Give the faces split off a face by the rail and corner merges
+   (the pairs recorded by UpdateTopologyChanges()) the existing-SSI
+   registrations of that face, and vice versa.
+NOTES: InsertIntersectionTopology() registers the (empty) intersection
+   of a fillet surface with the surface of the face a rail was merged
+   into so that the global merge skips the pair. Without composites a
+   face split by that merge owns a copy of the surface, so the split
+   faces were not covered, IntersectTopology() intersected them with
+   the fillet surfaces again along the rails and imprinted fragmented
+   spurious edges: the fillet ended up unglued (non-manifold body) or
+   the stitch crashed. Registrations are shared within every group of
+   faces that came out of one original face.
+***********************************************************************/
+SmStatus SmFilletExecutive::PropagateSplitFaceSSI()
+{
+  if(m_pTargetBrep == NULL)
+    { return SM_SUCCESS ; }
+
+  // the split groups: one temporary attribute per original face, shared with its split faces
+  SmTArray<SmFace*>      sFaces ;
+  SmTArray<SmAttribute*> sGroups ;
+  m_pTargetBrep->GetFaces(sFaces) ;
+  for(ULONG ii = 0 ; ii < sFaces.GetSize() ; ii++)
+    {
+      SmAttribute *pGroup = sFaces[ii]->FindAttribute( sm_lFilletSplitGroupAttrId ) ;
+      if(pGroup != NULL)
+        { sGroups.AddUnique(pGroup) ; }
+    } // end iter every target face
+
+  for(ULONG lGroup = 0 ; lGroup < sGroups.GetSize() ; lGroup++)
+    {
+      SmAttribute          * pGroup = sGroups[lGroup] ;
+      SmTArray<SmAObject*>   sUsers ;
+      SmTArray<SmFace*>      sMembers ;
+      SmTArray<SmSurface*>   sSurfaces ;
+      pGroup->GetUsers(sUsers) ;
+      for(ULONG ii = 0 ; ii < sUsers.GetSize() ; ii++)
+        {
+          SmFace *pFace = SM_CAST_PTR( SmFace, sUsers[ii] ) ;
+          if(pFace == NULL)
+            { continue ; }
+          sMembers.Add(pFace) ;
+          if(pFace->GetSurface() != NULL)
+            { sSurfaces.AddUnique(pFace->GetSurface()) ; }
+        } // end iter every face of this group
+      if(sSurfaces.GetSize() >= 2)
+        { SER(m_vTI.PropagateExistingSSI(sSurfaces)) ; }
+      // the group has done its job: detach it, the last removal deletes it (SM_AB_TEMP)
+      for(ULONG ii = 0 ; ii < sMembers.GetSize() ; ii++)
+        { sMembers[ii]->RemoveAttribute(pGroup) ; }
+    } // end iter every group
+  return SM_SUCCESS ;
+} // end SmFilletExecutive::PropagateSplitFaceSSI
 
 /*******************************************************************//**
 PURPOSE: Find all sequences of smoothly-meeting Filleted Edges,

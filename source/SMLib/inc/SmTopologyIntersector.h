@@ -211,6 +211,11 @@ public:
 
     SmStatus ClearExistingSSI();
 
+    // Register, for every surface of crSurfaces, the existing intersections that any other
+    // surface of crSurfaces is registered for. Used for the faces split off a face after
+    // its intersections were registered: a split face owns a copy of the surface.
+    SmStatus PropagateExistingSSI(const SmTArray<SmSurface*> & crSurfaces) ; // in : surfaces sharing their registrations
+
     SmStatus CloseIntersectionLoop
     (
       SmVertex  * pBrepVertex,                                 ///< [in ]: target vertex from m_pBrep     <br>

@@ -320,6 +320,65 @@ SmStatus SmTopologyIntersector::RegisterExistingSSI
 
 
 /*******************************************************************//**
+PURPOSE: Register, for every surface of crSurfaces, the existing
+    intersections that any other surface of crSurfaces is registered for.
+NOTES: Faces split off a face after its intersections were registered
+    own a copy of the surface (no composites any more), so the
+    registrations keyed by the original surface did not cover them and
+    IntersectTopology() intersected them again. Call this with the
+    surfaces of a face and of all faces split off it.
+***********************************************************************/
+SmStatus SmTopologyIntersector::PropagateExistingSSI
+  (const SmTArray<SmSurface*> & crSurfaces)  // in : surfaces sharing their registrations
+{
+  if(m_pIntersectionTable == NULL || crSurfaces.GetSize() < 2)
+    { return SM_SUCCESS ; }
+
+  // the table entries of any member of the group (the table grows below, so collect first)
+  SmTArray<ULONG> sEntries ;
+  for(ULONG ii = 0 ; ii < m_pIntersectionTable->m_vBrepSurfaces.GetSize() ; ii++)
+    {
+      ULONG lIndex ;
+      if(crSurfaces.FindElement(m_pIntersectionTable->m_vBrepSurfaces[ii], lIndex))
+        { sEntries.Add(ii) ; }
+    } // end iter every table entry
+
+  SmTArray<SmCurve*>         sNoCurves ;
+  SmTArray<SmTsectCurveType> sNoTypes ;
+  SmTArray<double>           sNoDeviations ;
+  for(ULONG ee = 0 ; ee < sEntries.GetSize() ; ee++)
+    {
+      ULONG       lEntry   = sEntries[ee] ;
+      SmSurface * pSurface = m_pIntersectionTable->m_vBrepSurfaces[lEntry] ;
+      SmSurface * pOther   = m_pIntersectionTable->m_vOtherSurfaces[lEntry] ;
+      for(ULONG ss = 0 ; ss < crSurfaces.GetSize() ; ss++)
+        {
+          SmSurface * pMember = crSurfaces[ss] ;
+          if(pMember == pSurface)
+            { continue ; }
+          SmBoolean bRegistered = FALSE ;
+          for(ULONG jj = 0 ; jj < m_pIntersectionTable->m_vBrepSurfaces.GetSize() ; jj++)
+            {
+              if(   m_pIntersectionTable->m_vBrepSurfaces[jj]  == pMember
+                 && m_pIntersectionTable->m_vOtherSurfaces[jj] == pOther)
+                { bRegistered = TRUE ; break ; }
+            } // end iter every table entry looking for the pair
+          if(bRegistered)
+            { continue ; }
+          const SmIntersectionResults & crResults = m_pIntersectionTable->m_vResults[lEntry] ;
+          SER(RegisterExistingSSI(pMember,                                                       // in : surf1
+                                  pOther,                                                        // in : surf2
+                                  crResults.m_p3DCurves   ? *crResults.m_p3DCurves   : sNoCurves,     // in : 3d xsect curves
+                                  crResults.m_pUVCurves1  ? *crResults.m_pUVCurves1  : sNoCurves,     // in : associated surf1 UVTrimCurves
+                                  crResults.m_pUVCurves2  ? *crResults.m_pUVCurves2  : sNoCurves,     // in : associated surf2 UVTrimCurves
+                                  crResults.m_pCurveTypes ? *crResults.m_pCurveTypes : sNoTypes,      // in : associated intersection curve types
+                                  crResults.m_pDeviations ? *crResults.m_pDeviations : sNoDeviations)) ; // in : associated intersection curve deviations
+        } // end iter every surface of the group
+    } // end iter every collected table entry
+  return SM_SUCCESS ;
+} // end SmTopologyIntersector::PropagateExistingSSI
+
+/*******************************************************************//**
 PURPOSE: Check to see if the preexisting relationship between two
     vertices indicate that squeezing of them needs to be done.
 

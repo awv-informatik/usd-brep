@@ -407,6 +407,11 @@ public:
 
   SmStatus UpdateTopologyChanges( SmAttribute  *pFaceAttr, SmFace *pOrigFace );
 
+  // Give the faces split off a face (grouped by UpdateTopologyChanges through a temporary
+  // attribute) the existing-SSI registrations of that face: a split face owns its own copy
+  // of the surface. No member is added: the class layout stays that of the vendor header.
+  SmStatus PropagateSplitFaceSSI() ;
+
   // simple data access
   const SmContext           * GetContext()            { return &m_crContext; };
   SmBrep                    * GetTargetBrep()         { return m_pTargetBrep; }
