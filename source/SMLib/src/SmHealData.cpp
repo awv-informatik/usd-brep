@@ -3250,6 +3250,29 @@ SmBoolean bDebugOk = TRUE ;
           { continue ; }
       }
 
+      // Only merge vertices that are duplicates of one another: copies that no face uses together
+      // (unstitched neighbours). Two vertices of the same face within the zone tolerance are the ends
+      // of a chain of short edges (sliver faces of a fillet corner, for example). Merging them makes
+      // CombineCoincidentVertices squeeze edges away or turns the chain into a two-edge loop, and the
+      // neighbouring faces end up with loop gaps larger than their tolerance: CheckLoop fails and an
+      // importer that relies on it falls back to isolated faces. Truly degenerate edges are handled by
+      // Fix_DegenEdges.
+      {
+        SmVertex * pV1 = sCoin1[ii]->m_sTgtItem->m_pVertex ;
+        SmVertex * pV2 = sCoin2[ii]->m_sTgtItem->m_pVertex ;
+        if(pV1 && pV2 && pV1 != pV2)
+          {
+            SmTArray<SmFace*> sFaces1, sFaces2 ;
+            pV1->GetFaces(sFaces1) ;
+            pV2->GetFaces(sFaces2) ;
+            SmBoolean bSameFace = FALSE ;
+            for(ULONG jj=0; jj<sFaces1.GetSize() && !bSameFace; jj++)
+              { ULONG lIdx ; if(sFaces2.FindElement(sFaces1[jj], lIdx)) { bSameFace = TRUE ; } }
+            if(bSameFace)
+              { continue ; }
+          }
+      }
+
       // add coincident pair Props to prob array and set linked SmVertexProps::&m_bBadCoincidentVertex flag to TRUE.
       m_sBadVertexProps_CoinVertices.Add(sCoin1[ii]->m_sTgtItem) ; 
       m_sBadVertexProps_CoinVertices.Add(sCoin2[ii]->m_sTgtItem) ;
