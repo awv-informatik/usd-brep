@@ -6133,6 +6133,68 @@ SmStatus SmFace::ComputePreciseProperties
 }
 
 /*******************************************************************//**
+PURPOSE: Integrate one parameter interval of a trim curve for
+    SmFace::ComputePreciseProperties and add the result to rY.
+
+NOTES: A coarse first Runge-Kutta step can trip the integrator's abort
+    guard for one traversal direction, so a reversed cap loop fails where
+    its twin succeeds: the interval is tried with a span/2 and a span/8 first
+    step. When the step budget of the integrator (lMaxStep, 10000) is
+    exhausted, the interval is bisected and each half gets the full budget
+    again. Retrying the whole interval with ever finer first steps, as
+    before, could not help: the adaptive control chooses the step size
+    itself, only the budget was too small for the curve. The trim curve of
+    a face whose surface has hundreds of knot spans in the direction of the
+    curve needs about twenty steps per span of the surface, which exceeds
+    the budget at once when the error scale is tight.
+***********************************************************************/
+static SmStatus sm_IntegrateSpanWithBisection
+(
+  SmODEIntegrator       & rODE,      // in : integrator with the area/volume evaluator
+  SmTArray<double>      & rY,        // in/out: accumulated integrals
+  double                  dA,        // in : interval start
+  double                  dB,        // in : interval end
+  double                  dAccuracy, // in : relative accuracy per step
+  SmTArray<double>      * pYScale,   // in : error scales
+  ULONG                   lMaxStep,  // in : step budget of rODE (SmODEIntegrator lMaxStep)
+  ULONG                   lDepth     // in : bisection depth, 0 at the top
+)
+{
+    static constexpr double kInitStepDivs[] = { 2.0, 8.0 };
+    static constexpr ULONG kNumInitStepDivs = sizeof(kInitStepDivs)/sizeof(kInitStepDivs[0]);
+    static constexpr ULONG kMaxBisectionDepth = 10; // up to 1024 parts of a knot span
+
+    if (SM_ARE_SAME(dA, dB)) { return SM_SUCCESS; } // an empty interval contributes nothing
+
+    const ULONG lNumComponents = rY.GetSize();
+    SmTArray<double> dPartY(lNumComponents,NULL,lNumComponents);
+    for (ULONG iDiv = 0; iDiv < kNumInitStepDivs; iDiv++)
+    {
+        ULONG lNumOK = 0, lNumBad = 0;
+        dPartY.SetAll(0.0);
+        SmStatus rkStat = rODE.RungeKuttaODEIntegrate(dPartY, dA, dB, dAccuracy,
+            (dB - dA)/kInitStepDivs[iDiv], 0.0, lNumOK, lNumBad, pYScale);
+        // Success with no steps means the integrator skipped the interval.
+        if (rkStat == SM_SUCCESS && lNumOK + lNumBad == 0) { rkStat = SM_ERR; }
+        if (rkStat == SM_SUCCESS)
+        {
+            for (ULONG q = 0; q < lNumComponents; q++) { rY[q] += dPartY[q]; }
+            return SM_SUCCESS;
+        }
+        // The step budget is exhausted: a finer first step cannot help, the
+        // adaptive control chooses the steps itself. Bisect at once.
+        if (lNumOK + lNumBad >= lMaxStep) { break; }
+    }
+
+    if (lDepth >= kMaxBisectionDepth) { SE(SM_ERR); return SM_ERR; }
+    const double dMid = 0.5 * (dA + dB);
+    if (!(dA < dMid && dMid < dB)) { SE(SM_ERR); return SM_ERR; } // interval too small to split
+    SER(sm_IntegrateSpanWithBisection(rODE, rY, dA, dMid, dAccuracy, pYScale, lMaxStep, lDepth + 1));
+    SER(sm_IntegrateSpanWithBisection(rODE, rY, dMid, dB, dAccuracy, pYScale, lMaxStep, lDepth + 1));
+    return SM_SUCCESS;
+}
+
+/*******************************************************************//**
 PURPOSE: Compute selected groups of precise face properties in one integration.
 
 NOTES: Groups are independent. Both nested integrations retain the historical
@@ -6222,7 +6284,8 @@ SmBoolean bDebugMe = FALSE;
 
             SmODEAreaIFEO sAreaEval(*this->GetSurface(),*pBSC,GetUVDomain().GetMin().y,
                 dDesiredAccuracy/10.0,&yscale,crOriginOfComputation,dFaceThickness,sLayout);
-            SmODEIntegrator sODE(sAreaEval);
+            static constexpr ULONG kTrimCurveMaxStep = 10000; // the default of SmODEIntegrator
+            SmODEIntegrator sODE(sAreaEval, kTrimCurveMaxStep);
             SmExtent1d sIvl = pBSC->GetNaturalInterval();
             ULONG lNumOK, lNumBad;
 
@@ -6232,34 +6295,19 @@ SmBoolean bDebugMe = FALSE;
             SmTArray<double> sKnots;
             SER(pBSC->GetKnots(sKnots, NULL, &sIvl));
 
-            // A coarse first Runge-Kutta step can trip the integrator's abort
-            // guard for one traversal direction, so a reversed cap loop fails
-            // where its twin succeeds. Try a span/2 first step, then fall back
-            // to finer steps; adaptive control converges to the same value.
-            static constexpr double kInitStepDivs[] = { 2.0, 8.0, 64.0, 512.0, 4096.0 };
-            static constexpr ULONG kNumInitStepDivs = sizeof(kInitStepDivs)/sizeof(kInitStepDivs[0]);
+            // Each knot span is integrated by sm_IntegrateSpanWithBisection: a coarse
+            // first step, a finer one, then bisection of the interval, each part with
+            // the full step budget of the integrator. A failure is propagated instead
+            // of dropping the boundary: a silent skip would return SM_SUCCESS with
+            // zero/partial properties, hiding a numerical failure as a valid zero.
             SmTArray<double> dY(lNumComponents,NULL,lNumComponents);
-            SmTArray<double> dSpanY(lNumComponents,NULL,lNumComponents);
             dY.SetAll(0.0);
             for (ULONG iSpan = 0; iSpan + 1 < sKnots.GetSize(); iSpan++)
             {
-                const double dA = sKnots[iSpan];
-                const double dB = sKnots[iSpan+1];
-                SmStatus rkStat = SM_ERR;
-                for (ULONG iDiv = 0; iDiv < kNumInitStepDivs && rkStat != SM_SUCCESS; iDiv++)
-                {
-                    lNumOK = lNumBad = 0;
-                    rkStat = sODE.RungeKuttaODEIntegrate(dSpanY, dA, dB, dDesiredAccuracy/10.0,
-                        (dB - dA)/kInitStepDivs[iDiv], 0.0, lNumOK, lNumBad, &yscale);
-                    // Success with no steps means the integrator skipped the span.
-                    if (lNumOK + lNumBad == 0) { rkStat = SM_ERR; }
-                }
-                // Propagate failure instead of dropping the boundary: a silent skip
-                // would return SM_SUCCESS with zero/partial properties, hiding a
-                // numerical failure as a valid zero.
-                SER(rkStat);
-                for (ULONG q = 0; q < lNumComponents; q++) { dY[q] += dSpanY[q]; }
+                SER(sm_IntegrateSpanWithBisection(sODE, dY, sKnots[iSpan], sKnots[iSpan+1],
+                    dDesiredAccuracy/10.0, &yscale, kTrimCurveMaxStep, 0));
             }
+            SM_REF2(lNumOK, lNumBad);
 
             // ODE evaluator indices are one-based; the result array is zero-based.
             if (sLayout.m_lArea) dTotalArea += dY[sLayout.m_lArea-1];
