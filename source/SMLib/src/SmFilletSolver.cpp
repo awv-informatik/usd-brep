@@ -1008,8 +1008,14 @@ SmStatus SmFilletSolver::CalcTorusFilletGeom
   if ( dSpanAng < SM_ANG_TOL_RAD )
     { dSpanAng += 2*SM_PI; }
 
-  dEndAng = SM_RAD2DEG( dSpanAng );
-  double dAngleSpan = dEndAng - dStartAng;
+  // dSpanAng is the whole angular span of the torus: the canonical torus created below starts at
+  // the cross-section arc, i.e. at sVec, and the rails run from sVec to sEndVec about
+  // sAxisOfRevolution. dStartAng is the absolute start angle of the edge arc in the frame IsArc
+  // chose and has nothing to do with that span; subtracting it gave a negative span for every
+  // edge arc that does not start at angle 0 of its frame (e.g. -132.8 degrees for an arc from
+  // 164.3 to 195.7 degrees), the extension then produced a torus of the right size rotated
+  // away from its edge, and the corner intersection failed to drop the fillet vertex onto it.
+  double dAngleSpan = SM_RAD2DEG( dSpanAng );
 
   // Determine if we need to extend the span even when 'm_bExtendBefore' is FALSE
   // In some cases, fillet(torus) will go beyond the start or end of the edge
