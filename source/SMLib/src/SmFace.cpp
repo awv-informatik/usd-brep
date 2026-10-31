@@ -17608,6 +17608,43 @@ static ULONG     lDebugCnt     = 0 ;
                   //    { bUseMaxPointSpacing = FALSE; }
                   //}
 
+                  // A vertex that lies on an edge of another loop of this face marks a point where two
+                  // loops touch (an inner loop inscribed in the outer loop, as a hexagonal pocket whose
+                  // corners lie on the base circle of a cone). A seam through such a vertex has no face
+                  // interior to split: its interval between the two loops is of tolerance size,
+                  // MergeIntervals inserts nothing and the face keeps its missing seam. Place the seam
+                  // in the centre of the largest gap instead.
+                  for(jj=0;(jj<sPairedVertexuses.GetSize()) && (bUseMaxPointSpacing == TRUE);jj++)
+                    {
+                      SmVertexuse * pVertexuse = sPairedVertexuses[jj] ;
+                      SmLoopuse   * pOwnLoopuse = pVertexuse->GetLoopuse() ;
+                      SmLoop      * pOwnLoop    = pOwnLoopuse ? pOwnLoopuse->GetLoop() : NULL ;
+                      SmPoint3d     sVertexPt   = pVertexuse->GetVertex()->GetPoint() ;
+                      SmTArray<SmLoop*> sFaceLoops ;
+                      GetLoops(sFaceLoops) ;
+                      for(kk=0;(kk<sFaceLoops.GetSize()) && (bUseMaxPointSpacing == TRUE);kk++)
+                        {
+                          if(sFaceLoops[kk] == pOwnLoop)
+                            { continue ; }
+                          SmTArray<SmEdge*> sOtherLoopEdges ;
+                          sFaceLoops[kk]->GetEdges(sOtherLoopEdges) ;
+                          for(ULONG ll=0;ll<sOtherLoopEdges.GetSize();ll++)
+                            {
+                              SmEdge  * pOtherEdge = sOtherLoopEdges[ll] ;
+                              SmBoolean bFound     = FALSE ;
+                              double    dParam     = 0.0 ;
+                              double    dDistance  = SM_BIG_DOUBLE ;
+                              if(   pOtherEdge->ClosestPoint(sVertexPt, bFound, dParam, dDistance) == SM_SUCCESS
+                                 && bFound
+                                 && dDistance <= (double)SmTol::GetZoneTol3d(pOtherEdge) + (double)SmTol::GetZoneTol3d(pVertexuse->GetVertex()))
+                                {
+                                  bUseMaxPointSpacing = FALSE ;
+                                  break ;
+                                }
+                            } // end iter every edge of the other loop
+                        } // end iter every other loop of this face
+                    } // end iter every paired Vertexuse - looking for a touch with another loop
+
                   // for every pair of Vertexuses - look for an Edge between them
                   for(jj=0;(jj<sPairedVertexuses.GetSize()-1) && (bUseMaxPointSpacing == TRUE);jj++)
                     {
