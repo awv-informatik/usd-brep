@@ -1121,7 +1121,17 @@ lDebugCnt++ ;
               pFace->GetSurface()->Evaluate1stDerivatives( rUVSectorIO.m_sBegEdgeUVPoint, TRUE, TRUE, sBeg3d, sBegDU, sBegDV ); // rSectorUVPoint was rStartEdgeUVPoint
               pFace->GetSurface()->Evaluate1stDerivatives( rUVSectorIO.m_sEndEdgeUVPoint, TRUE, TRUE, sEnd3d, sEndDU, sEndDV );
               double dRadLimit = .5 / 180. * SM_PI;
-              
+
+              // When a seam edge already ends at this vertex, one sector arm runs along the seam direction
+              // (angle to it within dRadLimit of 0 or PI) and the "arms on different sides of the iso line"
+              // test below cannot see the seam. The seam still continues into the face without an edge when
+              // the sector is wider than a half turn: the opposite seam direction then lies strictly inside
+              // the sector. Happens while SplitAtSeam inserts the seam in pieces through a vertex of
+              // another loop that lies on the seam (hole-loop corner on a cylinder seam). Not at a pole:
+              // there the seam edge ends on the singularity (full 360 degree sector) and nothing continues.
+              double    dWideSectorDeg = 180.0 + SM_RAD2DEG( dRadLimit );
+              SmBoolean bWideSector    = ( rUVSectorIO.m_bVertexOnPole == FALSE ) && ( rUVSectorIO.m_dSectorAngDeg > dWideSectorDeg );
+
               if ( eSeamDir == SM_SP_U || eSeamDir == SM_SP_BOTH )
               {
                   double dAng1, dAng2;
@@ -1131,6 +1141,13 @@ lDebugCnt++ ;
                   bHasIsoParamU = ( ( rUVSectorIO.m_sBegEdgeUVTan.x * rUVSectorIO.m_sEndEdgeUVTan.x ) < 0.0 )
                       && ( dAng1 > dRadLimit ) && ( dAng1 < SM_PI - dRadLimit )
                       && ( dAng2 > dRadLimit ) && ( dAng2 < SM_PI - dRadLimit );
+
+                  SmBoolean bBegAlongSeam = ( dAng1 <= dRadLimit ) || ( dAng1 >= SM_PI - dRadLimit );
+                  SmBoolean bEndAlongSeam = ( dAng2 <= dRadLimit ) || ( dAng2 >= SM_PI - dRadLimit );
+                  if (    bHasIsoParamU == FALSE
+                       && ( bBegAlongSeam || bEndAlongSeam )
+                       && bWideSector )
+                    { bHasIsoParamU = TRUE; }
               }
               if ( eSeamDir == SM_SP_V || eSeamDir == SM_SP_BOTH )
               {
@@ -1141,6 +1158,13 @@ lDebugCnt++ ;
                   bHasIsoParamV = ( ( rUVSectorIO.m_sBegEdgeUVTan.y * rUVSectorIO.m_sEndEdgeUVTan.y ) < 0.0 )
                       && ( dAng1 > dRadLimit ) && ( dAng1 < SM_PI - dRadLimit )
                       && ( dAng2 > dRadLimit ) && ( dAng2 < SM_PI - dRadLimit );
+
+                  SmBoolean bBegAlongSeam = ( dAng1 <= dRadLimit ) || ( dAng1 >= SM_PI - dRadLimit );
+                  SmBoolean bEndAlongSeam = ( dAng2 <= dRadLimit ) || ( dAng2 >= SM_PI - dRadLimit );
+                  if (    bHasIsoParamV == FALSE
+                       && ( bBegAlongSeam || bEndAlongSeam )
+                       && bWideSector )
+                    { bHasIsoParamV = TRUE; }
               }
 
 
