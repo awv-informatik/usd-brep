@@ -3739,6 +3739,71 @@ SmStatus SmTess::CheckAgainstSurfaceCache
         }
     }
 
+  // Interior segments: the surface image of a straight UV segment can bend away from the 3D chord
+  // between its end points even where the surface itself is flat, because the parameterization is
+  // curved (a cone with a semi-angle near 90 degrees is a plane in polar parameters: a UV segment
+  // along u is an arc, its 3D chord a secant). The cache tree, which only follows the surface
+  // curvature, does not subdivide there, so a long interior segment turns into a triangle edge that
+  // leaves the UV path by the sagitta of the arc and can cross the trim boundary in 3D.
+  // Measure the deviation at the segment midpoint and the turning angle of the two half chords,
+  // and request the subdivision count that brings them within the surface tessellation tolerances.
+  if(bIsInteriorEdge && pTessCache->m_cpSurface)
+    {
+      double dChordTol = m_rSurfaceTess.m_dChordHeight ;
+      double dAngTol   = m_rSurfaceTess.m_dAngTolDeg ;
+
+      if(dChordTol > 0.0 || dAngTol > 0.0)
+        {
+          const SmSurface * cpSurf = pTessCache->m_cpSurface ;
+          SmPoint2d sUV0(crStartPoint.x, crStartPoint.y) ;
+          SmPoint2d sUV1(crEndPoint.x,   crEndPoint.y) ;
+          SmPoint2d sUVM = (sUV0 + sUV1) / 2.0 ;
+          SmPoint3d sP0, sP1, sPM ;
+
+          if(   cpSurf->EvaluatePoint(sUV0, sP0) == SM_SUCCESS
+             && cpSurf->EvaluatePoint(sUV1, sP1) == SM_SUCCESS
+             && cpSurf->EvaluatePoint(sUVM, sPM) == SM_SUCCESS)
+            {
+              ULONG lPieces = 1 ;
+
+              // sagitta of the surface image against the 3D chord; it shrinks with the square of the piece length
+              if(dChordTol > 0.0)
+                {
+                  SmPoint3d sChordMid = (sP0 + sP1) / 2.0 ;
+                  double    dSagitta  = sPM.DistanceBetween(sChordMid) ;
+                  if(dSagitta > dChordTol)
+                    {
+                      ULONG lNeed = (ULONG)smos_Ceil(smos_Sqrt(dSagitta / dChordTol)) ;
+                      if(lNeed > lPieces) { lPieces = lNeed ; }
+                    }
+                }
+
+              // turning angle between the two half chords; it shrinks linearly with the piece length
+              if(dAngTol > 0.0)
+                {
+                  SmVector3d sHalf0 = sPM - sP0 ;
+                  SmVector3d sHalf1 = sP1 - sPM ;
+                  double     dAngRad = 0.0 ;
+                  if(   sHalf0.Length() > SM_EFF_ZERO
+                     && sHalf1.Length() > SM_EFF_ZERO
+                     && sHalf0.AngleBetween(sHalf1, dAngRad) == SM_SUCCESS)
+                    {
+                      double dAngDeg = SM_RAD2DEG(dAngRad) ;
+                      if(dAngDeg > dAngTol)
+                        {
+                          ULONG lNeed = (ULONG)smos_Ceil(dAngDeg / dAngTol) ;
+                          if(lNeed > lPieces) { lPieces = lNeed ; }
+                        }
+                    }
+                }
+
+              // pieces - 1 splits
+              if(lPieces > 1 && lPieces - 1 > rlNumberSubdivisions)
+                { rlNumberSubdivisions = lPieces - 1 ; }
+            }
+        }
+    }
+
   // This is a temp fix to avoid huge values '5650554'
   // It is suppressing the symptoms of another problem
   if (rlNumberSubdivisions > 100)
