@@ -4622,8 +4622,18 @@ TCHAR            sBuff[SM_TBLOCK_SIZE] ;
       NL_INDEX lMaxIndx = pCur1->knt->m ;
 
       // watch out for new degenerate segments - makes NLib calls directly
-      if(   ((pKnots[lDegree+1] - pKnots[0])                  < sZoneTol1dMin && sKnots.GetSize() > 2)
-         || ((pKnots[lMaxIndx]  - pKnots[lMaxIndx-lDegree-1]) < sZoneTol1dMax && sKnots.GetSize() > 2))
+      //
+      // A 2D curve is a UV trim curve. Its arc length is measured in parameter space, where the 3D zone
+      // tolerance has no meaning: on a surface with a normalized [0,1] domain it exceeds the length of whole
+      // spans, and N_CrvRemoveDegenSegs then strips most of the curve (a trim curve of 41 knots came back
+      // with 8), leaving a trim curve that no longer follows its edge. For a UV curve only numerically
+      // degenerate segments are removed.
+      const SmBoolean bUVCurve        = (GetDim() == 2) ;
+      const double    dDegenTol1dMin  = bUVCurve ? (double)sScaledZeroMin : (double)sZoneTol1dMin ;
+      const double    dDegenTol1dMax  = bUVCurve ? (double)sScaledZeroMax : (double)sZoneTol1dMax ;
+      const double    dDegenArcTol    = bUVCurve ? SM_EFF_ZERO_SQRT * ApproximateLength(sNatIvl, 10) : (double)sZoneTol3d ;
+      if(   ((pKnots[lDegree+1] - pKnots[0])                  < dDegenTol1dMin && sKnots.GetSize() > 2)
+         || ((pKnots[lMaxIndx]  - pKnots[lMaxIndx-lDegree-1]) < dDegenTol1dMax && sKnots.GetSize() > 2))
         {
           gw_CURVE           sCur2 ;
           NL_INDEX              nr ;
@@ -4632,8 +4642,8 @@ TCHAR            sBuff[SM_TBLOCK_SIZE] ;
 
           N_CrvInitArrays(&sCur2); // set members to NULL values - no mem allocation
 
-          NL_SER(N_CrvRemoveDegenSegs(pCur1,       // in : target curve to review
-                                      sZoneTol3d,  // in : max arc length for a degenerate segment
+          NL_SER(N_CrvRemoveDegenSegs(pCur1,         // in : target curve to review
+                                      dDegenArcTol,  // in : max arc length for a degenerate segment
                                       &nr,         // out: number of segments removed
                                       &sCur2,      // out: Curve after DegenSegment removal, mem alloced in SG
                                       &SG,         // in : curP's stack
