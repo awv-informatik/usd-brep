@@ -9807,6 +9807,20 @@ label_TryAgain:
                   lScore += (ULONG)((1.0 - sScoreParameters[lActParameters].dWt3d) * smos_Ceil(dAngDeg2d) +
                                     sScoreParameters[lActParameters].dWt3d * smos_Ceil(dAngDeg3d));
 
+                  // A corner that looks fine in UV but is a sliver in 3D (3d corner angle above 150 degrees) comes
+                  // from an anisotropic parameterization: on a thin band of a surface of revolution the UV
+                  // rectangle is a few units long and a fraction of a unit wide while in 3D it is hundreds of
+                  // times longer than wide. The UV angle then favours ears whose third edge runs along the band
+                  // (a chord across the ring in 3D) over the well shaped triangle across the band, and since the
+                  // remaining corners along the band are collinear in UV the fan grows over the whole band.
+                  // Penalize such corners like extra subdivisions so that the triangle across the band wins.
+                  // Only corners whose UV angle misrepresents the 3D angle by more than 30 degrees are
+                  // penalized: a sliver that is a sliver in UV as well (a corner of a nearly straight boundary
+                  // polyline) is scored by its angle as before, otherwise a far corner with a fan of long
+                  // triangles would be preferred over the harmless flat ear.
+                  if(dAngDeg3d > 150.0 && dAngDeg3d - dAngDeg2d > 30.0)
+                    { lScore += 1000 * (ULONG)smos_Ceil((dAngDeg3d - 150.0) / 10.0) ; }
+
 #ifdef SM_USE_TESS_DEGREE
                   {
                       // BEGIN JLMCC EDIT: Add vertex connectivity to score. Higher score means less likely to use,
