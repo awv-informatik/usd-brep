@@ -3623,9 +3623,23 @@ static constexpr SmBoolean bLogMe = FALSE ;
           // then figure which u/v direction to split by estimating which direction
           // is larger.  Get that estimate by multiplying the derivative magnitudes
           // at the center of the patch by the parameter ranges.
-          if(   dUChordHeight  <= pSurfaceCache->m_dChordHeightTolerance 
+          if(   dUChordHeight  <= pSurfaceCache->m_dChordHeightTolerance
              && dVChordHeight  <= pSurfaceCache->m_dChordHeightTolerance
-             && dUVChordHeight >  pSurfaceCache->m_dChordHeightTolerance)
+             && dUVChordHeight >  pSurfaceCache->m_dChordHeightTolerance
+             && smos_Max(dUChordHeight, dVChordHeight) > 0.25 * pSurfaceCache->m_dChordHeightTolerance)
+            {
+              // Only the diagonal height exceeds the tolerance, but one direction carries a noticeable
+              // part of it: split that direction. It reduces the diagonal height with the square of its
+              // span, the other direction hardly at all. On a ring of revolution whose generator
+              // curvature is in v, the rule below (split the 3D longer direction) split u four more
+              // times, down to 1/256 of the period, before the diagonal height fell below the
+              // tolerance, and the edges of the face got 256 segments against 64 on the neighbouring
+              // circle; the face was then meshed as a fan across the ring.
+              eSubdivideDirection = (dVChordHeight > dUChordHeight) ? SM_SP_V : SM_SP_U ;
+            }
+          else if(   dUChordHeight  <= pSurfaceCache->m_dChordHeightTolerance
+                  && dVChordHeight  <= pSurfaceCache->m_dChordHeightTolerance
+                  && dUVChordHeight >  pSurfaceCache->m_dChordHeightTolerance)
             {
               // evaluate first derivatives at center of patch
               double us, ue, vs, ve ;
