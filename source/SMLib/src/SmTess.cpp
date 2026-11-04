@@ -1964,6 +1964,25 @@ SmStatus SmTess::MakePolygon
                   SER(pEdgeuse->NormalizedEvaluate(0.0, TRUE, sStartUV)); // TRUE = UV Eval, FALSE = 3d Eval
                   SER(pEdgeuse->NormalizedEvaluate(1.0, TRUE, sEndUV)); // TRUE = UV Eval, FALSE = 3d Eval
               }
+              else
+              {
+                  // An edgeuse without a UV trim curve (the pieces of a seam edge that the tessellation
+                  // split lose theirs): the vertexuse UV points are not reliable here, because a vertex
+                  // on the seam of a periodic surface carries one UV point for both sides of the period.
+                  // The loop itself is the reference: the piece starts where the previous one ended and
+                  // ends where the UV trim curve of the next edgeuse starts. Trusting the vertexuse UV
+                  // point adds a filler polyedge across the whole period and the polygon folds.
+                  if (pStartVertex == pPrevEndVertex && jj > 0)
+                  {
+                      sStartUV = sPrevEndUV;
+                  }
+                  SmEdgeuse* pNextEdgeuse = (jj + 1 < lNumEdgeuses) ? sEdgeuses[jj + 1] : sEdgeuses[0];
+                  if (pNextEdgeuse && pNextEdgeuse->GetUVTrimCurve()
+                      && pNextEdgeuse->GetVertexuse()->GetVertex() == pEndVertex)
+                  {
+                      SER(pNextEdgeuse->NormalizedEvaluate(0.0, TRUE, sEndUV)); // TRUE = UV Eval, FALSE = 3d Eval
+                  }
+              }
 
 #ifdef SM_DEBUG_CODE
               if (bDebugMe)
