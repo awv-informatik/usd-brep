@@ -9807,6 +9807,44 @@ label_TryAgain:
                   lScore += (ULONG)((1.0 - sScoreParameters[lActParameters].dWt3d) * smos_Ceil(dAngDeg2d) +
                                     sScoreParameters[lActParameters].dWt3d * smos_Ceil(dAngDeg3d));
 
+                  // An ear whose triangle is oriented against the surface: at a corner that is nearly straight in
+                  // UV (three consecutive points of a boundary curve) the UV triangle is a thin positive sliver,
+                  // but in 3D the middle point lies on the other side of the chord, so the triangle's normal
+                  // points into the body and the facet renders inside out (a dark sliver along the edge). The
+                  // corner angles cannot tell, they are measured from surface derivatives, so test the triangle
+                  // itself against the surface normal at its centroid and score such an ear far behind every
+                  // regular one; it is taken only when nothing else is left. Only corners that are nearly
+                  // straight in UV are tested: on a strip narrower than the sag of its chords the zigzag
+                  // triangles between the two rims are reversed as well (sharp UV corners), there is no better
+                  // triangle for them, and scoring them away makes fans of long triangles along the strip.
+                  if (lScore < BAD_SCORE && dAngDeg2d > 150.0 && pPolyFace->GetOKBackPtrs() && pOriginalFace->GetSurface())
+                  {
+                      SmPoint3d const &sUV0 = pVCW_Vertex->GetPoint();
+                      SmPoint3d const &sUV1 = pV0Edge->GetStartPolyVertex()->GetPoint();
+                      SmPoint3d const &sUV2 = pVCCW_Vertex->GetPoint();
+                      SmPoint2d sUVa(sUV0.x, sUV0.y), sUVb(sUV1.x, sUV1.y), sUVc(sUV2.x, sUV2.y);
+                      SmPoint2d sUVm((sUV0.x + sUV1.x + sUV2.x) / 3.0, (sUV0.y + sUV1.y + sUV2.y) / 3.0);
+                      SmPoint3d sPa, sPb, sPc, sSurfNormal;
+                      if (   SM_SUCCESS == pOriginalFace->GetSurface()->EvaluatePoint(sUVa, sPa)
+                          && SM_SUCCESS == pOriginalFace->GetSurface()->EvaluatePoint(sUVb, sPb)
+                          && SM_SUCCESS == pOriginalFace->GetSurface()->EvaluatePoint(sUVc, sPc)
+                          && SM_SUCCESS == pOriginalFace->GetSurface()->EvaluateNormal(sUVm, TRUE, TRUE, sSurfNormal))
+                      {
+                          SmVector3d sE1 = sPb - sPa, sE2 = sPc - sPa;
+                          SmVector3d sTriNormal = sE1 * sE2;
+                          double const dTwiceArea = sTriNormal.Length();
+                          double const dNormalLength = sSurfNormal.Length();
+                          if (dTwiceArea > 0.0 && dNormalLength > 0.0)
+                          {
+                              double const dCos = sTriNormal.Dot(sSurfNormal) / (dTwiceArea * dNormalLength);
+                              if (dCos < -0.05)
+                              {
+                                  lScore += 10000;
+                              }
+                          }
+                      }
+                  }
+
 #ifdef SM_USE_TESS_DEGREE
                   {
                       // BEGIN JLMCC EDIT: Add vertex connectivity to score. Higher score means less likely to use,
