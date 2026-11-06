@@ -8923,6 +8923,28 @@ Here is how this works:
   NOTE-To improve quality measure edge length relative to quad size
   and find best corner to cut for optimal tessellation.
 ***********************************************************************/
+// TRUE when the UV polygon given by the start points of its PolyEdges encloses an area that is worth a mesh: its
+// signed area (shoelace) is more than 1e-3 of the square of its perimeter, i.e. it is not slimmer than about 250 : 1.
+// Used by TriangulateSingleFace to decide whether a polygon that has no ear left in any parameter set gets a full
+// rescore: a sliver polygon (e.g. the remainder of a degenerate loop whose UV curves all run along one boundary of the
+// surface) has nothing to mesh, and triangulating it anyway only adds triangles of arbitrary orientation.
+static SmBoolean sm_IsPolygonWorthRescoring(const SmTArray<SmPolyEdge*> & rPolyFaceEdges)
+{
+  ULONG lNum = rPolyFaceEdges.GetSize() ;
+  if (lNum < 3) { return FALSE ; }
+  double dArea2 = 0.0, dPerimeter = 0.0 ;
+  SmPoint3d sPrev = rPolyFaceEdges[lNum - 1]->GetStartPoint() ;
+  for (ULONG ii = 0 ; ii < lNum ; ii++)
+    {
+      SmPoint3d sCur = rPolyFaceEdges[ii]->GetStartPoint() ;
+      dArea2 += sPrev.x * sCur.y - sCur.x * sPrev.y ;
+      dPerimeter += smos_Sqrt((sCur.x - sPrev.x) * (sCur.x - sPrev.x) + (sCur.y - sPrev.y) * (sCur.y - sPrev.y)) ;
+      sPrev = sCur ;
+    }
+  if (dPerimeter <= 0.0) { return FALSE ; }
+  return (0.5 * smos_Fabs(dArea2) > 1.0e-3 * dPerimeter * dPerimeter) ? TRUE : FALSE ;
+}
+
 SmStatus SmTess::TriangulateSingleFace
  (SmTArray<SmPolyFace*> & rPolyFaceStack,        // i/o: Top member gets triangulated,
                                                  //      MakeManifoldEdge() generated children get added to stack.
@@ -9575,6 +9597,10 @@ SmStatus SmTess::TriangulateSingleFace
 
   const ULONG lNumParameters = ((sizeof(sScoreParameters))/(sizeof(sScoreParameters[0]))) ;
   ULONG       lActParameters = 0;
+  // Polygon size at the last computation of every corner's score (the first iteration scores every corner, the
+  // switch to the next parameter set resets every score): used below to decide whether a stuck polygon deserves
+  // a full rescore before the triangulation gives up on it.
+  ULONG       lNumEdgesAtFullRescore = sPolyFaceEdges.GetSize() ;
 
   // End Setup Experiment to make corner Score a weighted sum of 2d and 3d angles - used to only be 2d angles
 
@@ -10070,6 +10096,20 @@ label_TryAgain:
                   if ( lActParameters < lNumParameters - 1 )
                     {
                       ++lActParameters;
+                      lNumEdgesAtFullRescore = lNumEdges;
+                      goto label_TryAgain;    // <=== HEADS UP - A GOTO JUMP
+                    }
+                  else if ( lNumEdges < lNumEdgesAtFullRescore && sm_IsPolygonWorthRescoring(sPolyFaceEdges) )
+                    {
+                      // The scores are cached and only the corners next to a split-off triangle are recomputed, but a
+                      // corner scored BAD because its triangle contained other polygon vertices stays BAD after those
+                      // vertices have been split off as ears of their own: with every parameter set exhausted the
+                      // polygon would be dropped here (a hole in the mesh) although it has valid ears again. Since
+                      // the polygon has lost vertices since every corner was scored, score all corners again, from
+                      // the first parameter set; the polygon size guard makes this a single retry per size. A sliver
+                      // polygon (see sm_IsPolygonWorthRescoring) is left as before: it has no area worth a mesh.
+                      lActParameters = 0;
+                      lNumEdgesAtFullRescore = lNumEdges;
                       goto label_TryAgain;    // <=== HEADS UP - A GOTO JUMP
                     }
                   else
