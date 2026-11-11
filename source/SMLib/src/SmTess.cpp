@@ -8469,6 +8469,16 @@ static SmBoolean IsCollinear (double angleDeg)
     return smos_Fabs (angleDeg) < angleEps || smos_Fabs (180 - angleDeg) < angleEps || smos_Fabs (360 - angleDeg) < angleEps;
 }
 
+// Reversed ear test of the ear clipping.  Only a corner that is nearly straight in UV (angle above
+// sm_dReversedEarMinUVAngleDeg) is tested.  Its triangle counts as reversed when the cosine between the
+// triangle normal and the surface normal is below sm_dReversedEarMaxCos; the small margin below zero keeps
+// a triangle that is perpendicular to the normal within rounding from being penalized.  The penalty puts
+// the ear behind every regular one (angle scores, a few subdivisions at 1000 each) and far below BAD_SCORE,
+// so that it is taken only when nothing else is left.
+static const double sm_dReversedEarMinUVAngleDeg = 150.0 ;
+static const double sm_dReversedEarMaxCos        = -0.05 ;
+static const ULONG  sm_lReversedEarPenalty       = 10000 ;
+
 /*******************************************************************//**
 PURPOSE: For Debug only - pretty print corner scores and histories
          from SmTess::TriangulateFace()
@@ -9817,7 +9827,7 @@ label_TryAgain:
                   // straight in UV are tested: on a strip narrower than the sag of its chords the zigzag
                   // triangles between the two rims are reversed as well (sharp UV corners), there is no better
                   // triangle for them, and scoring them away makes fans of long triangles along the strip.
-                  if (lScore < BAD_SCORE && dAngDeg2d > 150.0 && pPolyFace->GetOKBackPtrs() && pOriginalFace->GetSurface())
+                  if (lScore < BAD_SCORE && dAngDeg2d > sm_dReversedEarMinUVAngleDeg && pPolyFace->GetOKBackPtrs() && pOriginalFace->GetSurface())
                   {
                       SmPoint3d const &sUV0 = pVCW_Vertex->GetPoint();
                       SmPoint3d const &sUV1 = pV0Edge->GetStartPolyVertex()->GetPoint();
@@ -9837,9 +9847,9 @@ label_TryAgain:
                           if (dTwiceArea > 0.0 && dNormalLength > 0.0)
                           {
                               double const dCos = sTriNormal.Dot(sSurfNormal) / (dTwiceArea * dNormalLength);
-                              if (dCos < -0.05)
+                              if (dCos < sm_dReversedEarMaxCos)
                               {
-                                  lScore += 10000;
+                                  lScore += sm_lReversedEarPenalty;
                               }
                           }
                       }
