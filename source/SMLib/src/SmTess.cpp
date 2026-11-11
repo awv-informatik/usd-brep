@@ -8491,6 +8491,16 @@ NOTES: score ==  (bInsideVertices) ? BAD_SCORE
 
 #define SM_SCORE_ITER_INC        (1 << 8)  // must be bigger than all other score values
 
+// Sliver penalty of the ear clipping.  A corner counts as a sliver in 3D from sm_dSliverCornerAngleDeg on,
+// but only when its UV angle is at least sm_dSliverAngleDeficitDeg smaller, i.e. when the parameterization
+// hides the sliver.  The penalty is the cost of one subdivision (1000, as for SM_SCORE_SUBDIVISIONS) per
+// started sm_dSliverPenaltyStepDeg above the sliver angle, so it outweighs every angle score (at most 360)
+// and stays far below BAD_SCORE.
+static const double sm_dSliverCornerAngleDeg  = 150.0 ;
+static const double sm_dSliverAngleDeficitDeg = 30.0 ;
+static const double sm_dSliverPenaltyStepDeg  = 10.0 ;
+static const ULONG  sm_lSliverPenaltyPerStep  = 1000 ;
+
 /*******************************************************************//**
 PURPOSE:
 
@@ -9818,8 +9828,8 @@ label_TryAgain:
                   // penalized: a sliver that is a sliver in UV as well (a corner of a nearly straight boundary
                   // polyline) is scored by its angle as before, otherwise a far corner with a fan of long
                   // triangles would be preferred over the harmless flat ear.
-                  if(dAngDeg3d > 150.0 && dAngDeg3d - dAngDeg2d > 30.0)
-                    { lScore += 1000 * (ULONG)smos_Ceil((dAngDeg3d - 150.0) / 10.0) ; }
+                  if(dAngDeg3d > sm_dSliverCornerAngleDeg && dAngDeg3d - dAngDeg2d > sm_dSliverAngleDeficitDeg)
+                    { lScore += sm_lSliverPenaltyPerStep * (ULONG)smos_Ceil((dAngDeg3d - sm_dSliverCornerAngleDeg) / sm_dSliverPenaltyStepDeg) ; }
 
 #ifdef SM_USE_TESS_DEGREE
                   {
