@@ -2118,7 +2118,7 @@ SmStatus SmHCR::IntersectCurveWithSilhouettes
 
   SmTArray<SmObject*> sObjectsInBox;
   SER(m_pSilEdgeTree->GetObjectsInBox(sEBBox, sObjectsInBox));
-  for (ii = 0;ii < sObjects.GetSize();ii++) { sSilEdges.Add((SmEdge*)sObjectsInBox[ii]); }
+  for (ii = 0;ii < sObjectsInBox.GetSize();ii++) { sSilEdges.Add((SmEdge*)sObjectsInBox[ii]); }
 
   ULONG lNumEdges = sSilEdges.GetSize();
 
