@@ -8928,6 +8928,9 @@ Here is how this works:
 // Used by TriangulateSingleFace to decide whether a polygon that has no ear left in any parameter set gets a full
 // rescore: a sliver polygon (e.g. the remainder of a degenerate loop whose UV curves all run along one boundary of the
 // surface) has nothing to mesh, and triangulating it anyway only adds triangles of arbitrary orientation.
+// Smallest share of the square of its perimeter that the area of a UV polygon must have to be worth a rescore.
+// For a strip of length a and width b the share is about b / (4 a), so 1e-3 is a strip 250 times longer than wide.
+static const double sm_dMinPolygonAreaShare = 1.0e-3 ;
 static SmBoolean sm_IsPolygonWorthRescoring(const SmTArray<SmPolyEdge*> & rPolyFaceEdges)
 {
   ULONG lNum = rPolyFaceEdges.GetSize() ;
@@ -8942,7 +8945,7 @@ static SmBoolean sm_IsPolygonWorthRescoring(const SmTArray<SmPolyEdge*> & rPolyF
       sPrev = sCur ;
     }
   if (dPerimeter <= 0.0) { return FALSE ; }
-  return (0.5 * smos_Fabs(dArea2) > 1.0e-3 * dPerimeter * dPerimeter) ? TRUE : FALSE ;
+  return (0.5 * smos_Fabs(dArea2) > sm_dMinPolygonAreaShare * dPerimeter * dPerimeter) ? TRUE : FALSE ;
 }
 
 SmStatus SmTess::TriangulateSingleFace
