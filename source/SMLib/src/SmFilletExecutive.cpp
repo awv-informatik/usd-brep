@@ -4519,10 +4519,9 @@ NOTES:
    or FilletCorners defined on the original Face, they might be defined on the
    portion of the Face that is now a new Face.  In that case, move it to the new Face.
 ***********************************************************************/
-// Temporary attribute shared by an original face and every face split off it by the rail and
-// corner merges (SM_AB_TEMP: neither copied on split nor written to files). Read and removed
-// by PropagateSplitFaceSSI() before the global merge.
-static const ULONG sm_lFilletSplitGroupAttrId = SM_AI_USER_3 + 4775 ;
+// An original face and every face split off it by the rail and corner merges share a temporary
+// SM_AI_FILLET_SPLIT_GROUP attribute, which PropagateSplitFaceSSI() reads and removes before the
+// global merge.
 
 SmStatus SmFilletExecutive::UpdateTopologyChanges(
                 SmAttribute  *pFaceAttr, // in: Attribute whose users are the original and split Faces
@@ -4546,15 +4545,15 @@ SmStatus SmFilletExecutive::UpdateTopologyChanges(
 
   // put the split faces into the split group of the original face, for PropagateSplitFaceSSI()
   {
-    SmAttribute * pGroup = pOrigFace->FindAttribute( sm_lFilletSplitGroupAttrId );
+    SmAttribute * pGroup = pOrigFace->FindAttribute( SM_AI_FILLET_SPLIT_GROUP );
     if ( pGroup == NULL )
       {
-        pGroup = new (m_crContext) SmAttribute( sm_lFilletSplitGroupAttrId, SM_AB_TEMP );
+        pGroup = new (m_crContext) SmAttribute( SM_AI_FILLET_SPLIT_GROUP, SM_AB_TEMP );
         pOrigFace->AddAttribute( pGroup );
       }
     for ( ULONG ii=0; ii<sFaces.GetSize(); ii++ )
       {
-        if ( sFaces[ii]->FindAttribute( sm_lFilletSplitGroupAttrId ) == NULL )
+        if ( sFaces[ii]->FindAttribute( SM_AI_FILLET_SPLIT_GROUP ) == NULL )
           { sFaces[ii]->AddAttribute( pGroup ); }
       }
   }
@@ -4620,7 +4619,7 @@ SmStatus SmFilletExecutive::PropagateSplitFaceSSI()
   m_pTargetBrep->GetFaces(sFaces) ;
   for(ULONG ii = 0 ; ii < sFaces.GetSize() ; ii++)
     {
-      SmAttribute *pGroup = sFaces[ii]->FindAttribute( sm_lFilletSplitGroupAttrId ) ;
+      SmAttribute *pGroup = sFaces[ii]->FindAttribute( SM_AI_FILLET_SPLIT_GROUP ) ;
       if(pGroup != NULL)
         { sGroups.AddUnique(pGroup) ; }
     } // end iter every target face

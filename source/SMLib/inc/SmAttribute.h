@@ -115,6 +115,11 @@ enum SmBooleanOperationType ;
 #define SM_AI_MESH_ATTRIBUTE                   311
 #define SM_AI_TESSELATION_POLY_EDGE_VERTEX_USE 312
 
+// Temporary attribute of SmFilletExecutive, shared by an original face and every face split off
+// it by the rail and corner merges (SM_AB_TEMP: neither copied on split nor written to files).
+// It is read and removed before the global merge.
+#define SM_AI_FILLET_SPLIT_GROUP               313
+
 #define SM_AI_USER_1  10000
 #define SM_AI_USER_2  20000
 #define SM_AI_USER_3  30000
