@@ -3453,6 +3453,12 @@ SmStatus SmSurfaceCache::LookAhead
 
 } // end SmSurfaceChache::LookAhead  
 
+// Share of the chord height tolerance from which the u or v control net height of a node counts as
+// carrying its deviation when only the diagonal net height fails.  Halving a direction reduces its
+// net height to a quarter, so a direction that is already below a quarter of the tolerance gains
+// nothing from a further split, and the split direction is chosen by the 3D side lengths instead.
+static const double sm_dNetHeightShareToSplit = 0.25 ;
+
 /*******************************************************************//**
 PURPOSE: Test the current tree node against the tolerances.
 
@@ -3626,7 +3632,7 @@ static constexpr SmBoolean bLogMe = FALSE ;
           if(   dUChordHeight  <= pSurfaceCache->m_dChordHeightTolerance
              && dVChordHeight  <= pSurfaceCache->m_dChordHeightTolerance
              && dUVChordHeight >  pSurfaceCache->m_dChordHeightTolerance
-             && smos_Max(dUChordHeight, dVChordHeight) > 0.25 * pSurfaceCache->m_dChordHeightTolerance)
+             && smos_Max(dUChordHeight, dVChordHeight) > sm_dNetHeightShareToSplit * pSurfaceCache->m_dChordHeightTolerance)
             {
               // Only the diagonal height exceeds the tolerance, but one direction carries a noticeable
               // part of it: split that direction. It reduces the diagonal height with the square of its
