@@ -25061,7 +25061,7 @@ SmStatus SmSurface::LocalLineIntersect
         if ( dDistSq < dAccuracySquared )
         {
             rbFound  = TRUE;
-            rUVFound = sUV;
+            rUVFound = crUVDomain.ClampPoint2d( sUV );  // sUV may lie outside the domain by up to dUVTol (see below); callers test the domain with zero tolerance
             rdTFound = dT;
             rdDeviation = smos_Sqrt(dDistSq);
             rPoint = rSrfPnt;
